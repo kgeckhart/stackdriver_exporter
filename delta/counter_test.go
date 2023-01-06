@@ -13,12 +13,16 @@ import (
 )
 
 var _ = Describe("Counter", func() {
-	var store *delta.InMemoryCounterStore
+	var store delta.CounterStore
 	var metric *collectors.ConstMetric
 	descriptor := &monitoring.MetricDescriptor{Name: "This is a metric"}
+	logger := promlog.New(&promlog.Config{})
 
 	BeforeEach(func() {
-		store = delta.NewInMemoryCounterStore(promlog.New(&promlog.Config{}), time.Minute)
+		store = delta.CounterStore{
+			Storage: delta.NewInMemoryStorage[*collectors.ConstMetric](logger, time.Minute),
+			Logger:  logger,
+		}
 		metric = &collectors.ConstMetric{
 			FqName:         "counter_name",
 			LabelKeys:      []string{"labelKey"},

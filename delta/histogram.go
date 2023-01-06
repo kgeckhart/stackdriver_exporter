@@ -17,8 +17,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -27,58 +25,31 @@ import (
 	"github.com/prometheus-community/stackdriver_exporter/collectors"
 )
 
-type HistogramEntry struct {
-	Collected map[uint64]*collectors.HistogramMetric
-	mutex     *sync.RWMutex
+type HistogramStore struct {
+	Storage Storage[*collectors.HistogramMetric]
+	Logger  log.Logger
 }
 
-type InMemoryHistogramStore struct {
-	store  *sync.Map
-	ttl    time.Duration
-	logger log.Logger
-}
-
-// NewInMemoryHistogramStore returns an implementation of HistogramStore which is persisted in-memory
-func NewInMemoryHistogramStore(logger log.Logger, ttl time.Duration) *InMemoryHistogramStore {
-	store := &InMemoryHistogramStore{
-		store:  &sync.Map{},
-		logger: logger,
-		ttl:    ttl,
-	}
-
-	return store
-}
-
-func (s *InMemoryHistogramStore) Increment(metricDescriptor *monitoring.MetricDescriptor, currentValue *collectors.HistogramMetric) {
+func (s *HistogramStore) Increment(metricDescriptor *monitoring.MetricDescriptor, currentValue *collectors.HistogramMetric) {
 	if currentValue == nil {
 		return
 	}
-
-	tmp, _ := s.store.LoadOrStore(metricDescriptor.Name, &HistogramEntry{
-		Collected: map[uint64]*collectors.HistogramMetric{},
-		mutex:     &sync.RWMutex{},
-	})
-	entry := tmp.(*HistogramEntry)
-
 	key := toHistogramKey(currentValue)
-
-	entry.mutex.Lock()
-	defer entry.mutex.Unlock()
-	existing := entry.Collected[key]
+	existing := s.Storage.Get(metricDescriptor.Name, key)
 
 	if existing == nil {
-		level.Debug(s.logger).Log("msg", "Tracking new histogram", "fqName", currentValue.FqName, "key", key, "incoming_time", currentValue.ReportTime)
-		entry.Collected[key] = currentValue
+		level.Debug(s.Logger).Log("msg", "Tracking new histogram", "fqName", currentValue.FqName, "key", key, "incoming_time", currentValue.ReportTime)
+		s.Storage.Set(metricDescriptor.Name, key, currentValue)
 		return
 	}
 
 	if existing.ReportTime.Before(currentValue.ReportTime) {
-		level.Debug(s.logger).Log("msg", "Incrementing existing histogram", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
-		entry.Collected[key] = mergeHistograms(existing, currentValue)
+		level.Debug(s.Logger).Log("msg", "Incrementing existing histogram", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
+		s.Storage.Set(metricDescriptor.Name, key, mergeHistograms(existing, currentValue))
 		return
 	}
 
-	level.Debug(s.logger).Log("msg", "Ignoring old sample for histogram", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
+	level.Debug(s.Logger).Log("msg", "Ignoring old sample for histogram", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
 }
 
 func toHistogramKey(hist *collectors.HistogramMetric) uint64 {
@@ -121,30 +92,6 @@ func mergeHistograms(existing *collectors.HistogramMetric, current *collectors.H
 	return current
 }
 
-func (s *InMemoryHistogramStore) ListMetrics(metricDescriptorName string) []*collectors.HistogramMetric {
-	var output []*collectors.HistogramMetric
-	now := time.Now()
-	ttlWindowStart := now.Add(-s.ttl)
-
-	tmp, exists := s.store.Load(metricDescriptorName)
-	if !exists {
-		return output
-	}
-	entry := tmp.(*HistogramEntry)
-
-	entry.mutex.Lock()
-	defer entry.mutex.Unlock()
-	for key, collected := range entry.Collected {
-		//Scan and remove metrics which are outside the TTL
-		if ttlWindowStart.After(collected.CollectionTime) {
-			level.Debug(s.logger).Log("msg", "Deleting histogram entry outside of TTL", "key", key, "fqName", collected.FqName)
-			delete(entry.Collected, key)
-			continue
-		}
-
-		copy := *collected
-		output = append(output, &copy)
-	}
-
-	return output
+func (s *HistogramStore) ListMetrics(metricDescriptorName string) []*collectors.HistogramMetric {
+	return s.Storage.List(metricDescriptorName)
 }

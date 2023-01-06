@@ -13,12 +13,16 @@ import (
 )
 
 var _ = Describe("HistogramStore", func() {
-	var store *delta.InMemoryHistogramStore
+	var store delta.HistogramStore
 	var histogram *collectors.HistogramMetric
 	descriptor := &monitoring.MetricDescriptor{Name: "This is a metric"}
+	logger := promlog.New(&promlog.Config{})
 
 	BeforeEach(func() {
-		store = delta.NewInMemoryHistogramStore(promlog.New(&promlog.Config{}), time.Minute)
+		store = delta.HistogramStore{
+			Storage: delta.NewInMemoryStorage[*collectors.HistogramMetric](logger, time.Minute),
+			Logger:  logger,
+		}
 		histogram = &collectors.HistogramMetric{
 			FqName:         "histogram_name",
 			LabelKeys:      []string{"labelKey"},

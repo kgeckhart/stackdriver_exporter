@@ -86,6 +86,10 @@ type ConstMetric struct {
 	KeysHash uint64
 }
 
+func (c *ConstMetric) LastCollectedAt() time.Time {
+	return c.CollectionTime
+}
+
 type HistogramMetric struct {
 	FqName         string
 	LabelKeys      []string
@@ -97,6 +101,10 @@ type HistogramMetric struct {
 	CollectionTime time.Time
 
 	KeysHash uint64
+}
+
+func (h *HistogramMetric) LastCollectedAt() time.Time {
+	return h.CollectionTime
 }
 
 func (t *timeSeriesMetrics) CollectNewConstHistogram(timeSeries *monitoring.TimeSeries, reportTime time.Time, labelKeys []string, dist *monitoring.Distribution, buckets map[float64]uint64, labelValues []string, metricKind string) {

@@ -17,8 +17,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -27,59 +25,32 @@ import (
 	"github.com/prometheus-community/stackdriver_exporter/collectors"
 )
 
-type MetricEntry struct {
-	Collected map[uint64]*collectors.ConstMetric
-	mutex     *sync.RWMutex
+type CounterStore struct {
+	Storage Storage[*collectors.ConstMetric]
+	Logger  log.Logger
 }
 
-type InMemoryCounterStore struct {
-	store  *sync.Map
-	ttl    time.Duration
-	logger log.Logger
-}
-
-// NewInMemoryCounterStore returns an implementation of CounterStore which is persisted in-memory
-func NewInMemoryCounterStore(logger log.Logger, ttl time.Duration) *InMemoryCounterStore {
-	store := &InMemoryCounterStore{
-		store:  &sync.Map{},
-		logger: logger,
-		ttl:    ttl,
-	}
-
-	return store
-}
-
-func (s *InMemoryCounterStore) Increment(metricDescriptor *monitoring.MetricDescriptor, currentValue *collectors.ConstMetric) {
+func (s *CounterStore) Increment(metricDescriptor *monitoring.MetricDescriptor, currentValue *collectors.ConstMetric) {
 	if currentValue == nil {
 		return
 	}
-
-	tmp, _ := s.store.LoadOrStore(metricDescriptor.Name, &MetricEntry{
-		Collected: map[uint64]*collectors.ConstMetric{},
-		mutex:     &sync.RWMutex{},
-	})
-	entry := tmp.(*MetricEntry)
-
 	key := toCounterKey(currentValue)
-
-	entry.mutex.Lock()
-	defer entry.mutex.Unlock()
-	existing := entry.Collected[key]
+	existing := s.Storage.Get(metricDescriptor.Name, key)
 
 	if existing == nil {
-		level.Debug(s.logger).Log("msg", "Tracking new counter", "fqName", currentValue.FqName, "key", key, "current_value", currentValue.Value, "incoming_time", currentValue.ReportTime)
-		entry.Collected[key] = currentValue
+		level.Debug(s.Logger).Log("msg", "Tracking new counter", "fqName", currentValue.FqName, "key", key, "current_value", currentValue.Value, "incoming_time", currentValue.ReportTime)
+		s.Storage.Set(metricDescriptor.Name, key, currentValue)
 		return
 	}
 
 	if existing.ReportTime.Before(currentValue.ReportTime) {
-		level.Debug(s.logger).Log("msg", "Incrementing existing counter", "fqName", currentValue.FqName, "key", key, "current_value", existing.Value, "adding", currentValue.Value, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
+		level.Debug(s.Logger).Log("msg", "Incrementing existing counter", "fqName", currentValue.FqName, "key", key, "current_value", existing.Value, "adding", currentValue.Value, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
 		currentValue.Value = currentValue.Value + existing.Value
-		entry.Collected[key] = currentValue
+		s.Storage.Set(metricDescriptor.Name, key, currentValue)
 		return
 	}
 
-	level.Debug(s.logger).Log("msg", "Ignoring old sample for counter", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
+	level.Debug(s.Logger).Log("msg", "Ignoring old sample for counter", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
 }
 
 func toCounterKey(c *collectors.ConstMetric) uint64 {
@@ -101,31 +72,6 @@ func toCounterKey(c *collectors.ConstMetric) uint64 {
 	return h
 }
 
-func (s *InMemoryCounterStore) ListMetrics(metricDescriptorName string) []*collectors.ConstMetric {
-	var output []*collectors.ConstMetric
-	now := time.Now()
-	ttlWindowStart := now.Add(-s.ttl)
-
-	tmp, exists := s.store.Load(metricDescriptorName)
-	if !exists {
-		return output
-	}
-	entry := tmp.(*MetricEntry)
-
-	entry.mutex.Lock()
-	defer entry.mutex.Unlock()
-	for key, collected := range entry.Collected {
-		//Scan and remove metrics which are outside the TTL
-		if ttlWindowStart.After(collected.CollectionTime) {
-			level.Debug(s.logger).Log("msg", "Deleting counter entry outside of TTL", "key", key, "fqName", collected.FqName)
-			delete(entry.Collected, key)
-			continue
-		}
-
-		//Dereference to create shallow copy
-		metricCopy := *collected
-		output = append(output, &metricCopy)
-	}
-
-	return output
+func (s *CounterStore) ListMetrics(metricDescriptorName string) []*collectors.ConstMetric {
+	return s.Storage.List(metricDescriptorName)
 }

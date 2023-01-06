@@ -198,16 +198,29 @@ func (h *handler) innerHandler(filters map[string]bool) http.Handler {
 	registry := prometheus.NewRegistry()
 
 	for _, project := range h.projectIDs {
-		monitoringCollector, err := collectors.NewMonitoringCollector(project, h.m, collectors.MonitoringCollectorOptions{
-			MetricTypePrefixes:    h.filterMetricTypePrefixes(filters),
-			ExtraFilters:          h.metricsExtraFilters,
-			RequestInterval:       *monitoringMetricsInterval,
-			RequestOffset:         *monitoringMetricsOffset,
-			IngestDelay:           *monitoringMetricsIngestDelay,
-			FillMissingLabels:     *collectorFillMissingLabels,
-			DropDelegatedProjects: *monitoringDropDelegatedProjects,
-			AggregateDeltas:       *monitoringMetricsAggregateDeltas,
-		}, h.logger, delta.NewInMemoryCounterStore(h.logger, *monitoringMetricsDeltasTTL), delta.NewInMemoryHistogramStore(h.logger, *monitoringMetricsDeltasTTL))
+		monitoringCollector, err := collectors.NewMonitoringCollector(
+			project,
+			h.m,
+			collectors.MonitoringCollectorOptions{
+				MetricTypePrefixes:    h.filterMetricTypePrefixes(filters),
+				ExtraFilters:          h.metricsExtraFilters,
+				RequestInterval:       *monitoringMetricsInterval,
+				RequestOffset:         *monitoringMetricsOffset,
+				IngestDelay:           *monitoringMetricsIngestDelay,
+				FillMissingLabels:     *collectorFillMissingLabels,
+				DropDelegatedProjects: *monitoringDropDelegatedProjects,
+				AggregateDeltas:       *monitoringMetricsAggregateDeltas,
+			},
+			h.logger,
+			&delta.CounterStore{
+				Storage: delta.NewInMemoryStorage[*collectors.ConstMetric](h.logger, *monitoringMetricsDeltasTTL),
+				Logger:  h.logger,
+			},
+			&delta.HistogramStore{
+				Storage: delta.NewInMemoryStorage[*collectors.HistogramMetric](h.logger, *monitoringMetricsDeltasTTL),
+				Logger:  h.logger,
+			},
+		)
 		if err != nil {
 			level.Error(h.logger).Log("err", err)
 			os.Exit(1)
