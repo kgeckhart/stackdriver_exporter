@@ -35,6 +35,7 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/prometheus-community/stackdriver_exporter/collectors"
+	"github.com/prometheus-community/stackdriver_exporter/delta"
 	"github.com/prometheus-community/stackdriver_exporter/utils"
 )
 
@@ -206,7 +207,7 @@ func (h *handler) innerHandler(filters map[string]bool) http.Handler {
 			FillMissingLabels:     *collectorFillMissingLabels,
 			DropDelegatedProjects: *monitoringDropDelegatedProjects,
 			AggregateDeltas:       *monitoringMetricsAggregateDeltas,
-		}, h.logger, collectors.NewInMemoryDeltaCounterStore(h.logger, *monitoringMetricsDeltasTTL), collectors.NewInMemoryDeltaDistributionStore(h.logger, *monitoringMetricsDeltasTTL))
+		}, h.logger, delta.NewInMemoryCounterStore(h.logger, *monitoringMetricsDeltasTTL), delta.NewInMemoryHistogramStore(h.logger, *monitoringMetricsDeltasTTL))
 		if err != nil {
 			level.Error(h.logger).Log("err", err)
 			os.Exit(1)
