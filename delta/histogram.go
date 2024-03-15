@@ -50,8 +50,8 @@ func NewInMemoryHistogramStore(logger log.Logger, ttl time.Duration) *InMemoryHi
 	return store
 }
 
-func (s *InMemoryHistogramStore) Increment(metricDescriptor *monitoring.MetricDescriptor, currentValue *collectors.HistogramMetric) {
-	if currentValue == nil {
+func (s *InMemoryHistogramStore) Increment(metricDescriptor *monitoring.MetricDescriptor, incoming *collectors.HistogramMetric) {
+	if incoming == nil {
 		return
 	}
 
@@ -61,27 +61,27 @@ func (s *InMemoryHistogramStore) Increment(metricDescriptor *monitoring.MetricDe
 	})
 	entry := tmp.(*HistogramEntry)
 
-	key := toHistogramKey(currentValue)
+	key := toHistogramKey(incoming)
 
 	entry.mutex.Lock()
 	defer entry.mutex.Unlock()
 	existing := entry.Collected[key]
 
 	if existing == nil {
-		level.Debug(s.logger).Log("msg", "Tracking new histogram", "fqName", currentValue.FqName, "key", key, "incoming_time", currentValue.ReportTime)
-		entry.Collected[key] = currentValue
+		level.Debug(s.logger).Log("msg", "Tracking new histogram", "fqName", incoming.FqName, "key", key, "incoming_time", incoming.ReportTime, "incoming_sum", incoming.Sum, "incoming_count", incoming.Count)
+		entry.Collected[key] = incoming
 		return
 	}
 
-	if existing.ReportTime.Before(currentValue.ReportTime) {
-		level.Debug(s.logger).Log("msg", "Incrementing existing histogram", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
-		currentValue.MergeHistogram(existing)
+	if existing.ReportTime.Before(incoming.ReportTime) {
+		level.Debug(s.logger).Log("msg", "Incrementing existing histogram", "fqName", incoming.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", incoming.ReportTime, "incoming_sum", incoming.Sum, "incoming_count", incoming.Count, "existing_sum", existing.Sum, "existing_count", existing.Count)
+		incoming.MergeHistogram(existing)
 		// Replace the existing histogram by the new one after merging it.
-		entry.Collected[key] = currentValue
+		entry.Collected[key] = incoming
 		return
 	}
 
-	level.Debug(s.logger).Log("msg", "Ignoring old sample for histogram", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
+	level.Debug(s.logger).Log("msg", "Ignoring old sample for histogram", "fqName", incoming.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", incoming.ReportTime)
 }
 
 func toHistogramKey(hist *collectors.HistogramMetric) uint64 {

@@ -50,8 +50,8 @@ func NewInMemoryCounterStore(logger log.Logger, ttl time.Duration) *InMemoryCoun
 	return store
 }
 
-func (s *InMemoryCounterStore) Increment(metricDescriptor *monitoring.MetricDescriptor, currentValue *collectors.ConstMetric) {
-	if currentValue == nil {
+func (s *InMemoryCounterStore) Increment(metricDescriptor *monitoring.MetricDescriptor, incoming *collectors.ConstMetric) {
+	if incoming == nil {
 		return
 	}
 
@@ -61,26 +61,26 @@ func (s *InMemoryCounterStore) Increment(metricDescriptor *monitoring.MetricDesc
 	})
 	entry := tmp.(*MetricEntry)
 
-	key := toCounterKey(currentValue)
+	key := toCounterKey(incoming)
 
 	entry.mutex.Lock()
 	defer entry.mutex.Unlock()
 	existing := entry.Collected[key]
 
 	if existing == nil {
-		level.Debug(s.logger).Log("msg", "Tracking new counter", "fqName", currentValue.FqName, "key", key, "current_value", currentValue.Value, "incoming_time", currentValue.ReportTime)
-		entry.Collected[key] = currentValue
+		level.Debug(s.logger).Log("msg", "Tracking new counter", "fqName", incoming.FqName, "key", key, "current_value", incoming.Value, "incoming_time", incoming.ReportTime)
+		entry.Collected[key] = incoming
 		return
 	}
 
-	if existing.ReportTime.Before(currentValue.ReportTime) {
-		level.Debug(s.logger).Log("msg", "Incrementing existing counter", "fqName", currentValue.FqName, "key", key, "current_value", existing.Value, "adding", currentValue.Value, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
-		currentValue.Value = currentValue.Value + existing.Value
-		entry.Collected[key] = currentValue
+	if existing.ReportTime.Before(incoming.ReportTime) {
+		level.Debug(s.logger).Log("msg", "Incrementing existing counter", "fqName", incoming.FqName, "key", key, "current_value", existing.Value, "adding", incoming.Value, "last_reported_time", existing.ReportTime, "incoming_time", incoming.ReportTime)
+		incoming.Value = incoming.Value + existing.Value
+		entry.Collected[key] = incoming
 		return
 	}
 
-	level.Debug(s.logger).Log("msg", "Ignoring old sample for counter", "fqName", currentValue.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", currentValue.ReportTime)
+	level.Debug(s.logger).Log("msg", "Ignoring old sample for counter", "fqName", incoming.FqName, "key", key, "last_reported_time", existing.ReportTime, "incoming_time", incoming.ReportTime)
 }
 
 func toCounterKey(c *collectors.ConstMetric) uint64 {
@@ -116,14 +116,14 @@ func (s *InMemoryCounterStore) ListMetrics(metricDescriptorName string) []*colle
 	entry.mutex.Lock()
 	defer entry.mutex.Unlock()
 	for key, collected := range entry.Collected {
-		//Scan and remove metrics which are outside the TTL
+		// Scan and remove metrics which are outside the TTL
 		if ttlWindowStart.After(collected.CollectionTime) {
 			level.Debug(s.logger).Log("msg", "Deleting counter entry outside of TTL", "key", key, "fqName", collected.FqName)
 			delete(entry.Collected, key)
 			continue
 		}
 
-		//Dereference to create shallow copy
+		// Dereference to create shallow copy
 		metricCopy := *collected
 		output = append(output, &metricCopy)
 	}
